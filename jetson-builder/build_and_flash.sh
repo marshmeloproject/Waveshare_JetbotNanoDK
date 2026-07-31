@@ -256,6 +256,16 @@ if [ "$CONFIRM_CHOICE" = "yes" ]; then
 
     # Clean up staging directory inside rootfs
     rm -rf "$ROOTFS_DIR/tmp/provision"
+    
+    # =========================================================================
+    # ADD THIS: Explicitly unmount before moving to Step 4 & 5
+    # =========================================================================
+    echo -e "\n---> Unmounting virtual filesystems..."
+    umount -f "$ROOTFS_DIR/dev/pts" 2>/dev/null || true
+    umount -f "$ROOTFS_DIR/dev" 2>/dev/null || true
+    umount -f "$ROOTFS_DIR/sys" 2>/dev/null || true
+    umount -f "$ROOTFS_DIR/proc" 2>/dev/null || true
+
     echo -e "\n---> Target provisioning complete!"
 
 else
@@ -270,46 +280,49 @@ echo "================================================================"
 
 echo -e "\n*** ACTION REQUIRED ***"
 echo "Please ensure your TF card (min 32GB) is inserted into the host PC."
-read -n 1 -s -r -p "Press 'c' to continue once the TF card is inserted..." key
-if [ "$key" != "c" ] && [ "$key" != "C" ]; then
-    echo -e "\nAborted."
-    exit 1
-fi
+confirm "Proceed with TF Card preparation and cloning?" n
 
-echo -e "\n================================================================"
-lsblk -e 7
-echo "================================================================"
-read -p "Look at the list above. Enter the identifier of your TF Card (e.g., sdb, sdc): " TFCARD
-
-if [ -z "$TFCARD" ] || [ ! -b "/dev/$TFCARD" ]; then
-    echo "Invalid drive selected. Aborting to protect host system."
-    exit 1
-fi
-
-SIZE=$(blockdev --getsize64 /dev/$TFCARD)
-if [ "$SIZE" -lt 30000000000 ]; then
-    echo "Error: Selected drive is smaller than 32GB. Aborting."
-    exit 1
-fi
-
-confirm "WARNING: /dev/$TFCARD will be WIPED and reformatted as ext4. Proceed?" a
-
-if [ "$CONFIRM_CHOICE" = "yes" ]; then
-    echo -e "\n---> Formatting /dev/$TFCARD as ext4..."
-    umount /dev/${TFCARD}* 2>/dev/null || true
-    parted -s /dev/$TFCARD mklabel gpt
-    parted -s /dev/$TFCARD mkpart primary ext4 0% 100%
-    mkfs.ext4 -F /dev/${TFCARD}1
+if [ "$CONFIRM_CHOICE" != "yes" ]; then
+    echo -e "\n---> Skipping TF Card preparation and cloning step."
+    echo "    You can clone the rootfs to a TF card manually later with:"
+    echo "      mkfs.ext4 -F /dev/<tfcard>1 && mount /dev/<tfcard>1 /mnt"
+    echo "      rsync -axHAWX --numeric-ids $ROOTFS_DIR/ /mnt/"
+    echo "      sync && umount /mnt"
 else
-    echo -e "\n---> Skipped or declined formatting. Cannot proceed with cloning."
-fi
+    echo -e "\n================================================================"
+    lsblk -e 7
+    echo "================================================================"
+    read -p "Look at the list above. Enter the identifier of your TF Card (e.g., sdb, sdc): " TFCARD
 
-echo -e "\n---> Cloning RootFS to TF Card (This will take a few minutes)..."
-mount /dev/${TFCARD}1 /mnt
-rsync -axHAWX --numeric-ids --info=progress2 rootfs/ /mnt/
-sync
-umount /mnt
-echo "TF Card clone complete. You may leave the card in the host or insert it into the Jetson."
+    if [ -z "$TFCARD" ] || [ ! -b "/dev/$TFCARD" ]; then
+        echo "Invalid drive selected. Skipping TF Card cloning to protect host system."
+    else
+        SIZE=$(blockdev --getsize64 /dev/$TFCARD)
+        if [ "$SIZE" -lt 30000000000 ]; then
+            echo "Error: Selected drive is smaller than 32GB. Skipping TF Card cloning."
+        else
+            confirm "WARNING: /dev/$TFCARD will be WIPED and reformatted as ext4. Proceed?" a
+
+            if [ "$CONFIRM_CHOICE" = "yes" ]; then
+                echo -e "\n---> Formatting /dev/$TFCARD as ext4..."
+                umount /dev/${TFCARD}* 2>/dev/null || true
+                parted -s /dev/$TFCARD mklabel gpt
+                parted -s /dev/$TFCARD mkpart primary ext4 0% 100%
+                mkfs.ext4 -F /dev/${TFCARD}1
+
+                echo -e "\n---> Cloning RootFS to TF Card (This will take a few minutes)..."
+                mount /dev/${TFCARD}1 /mnt
+                rsync -axHAWX --numeric-ids --info=progress2 rootfs/ /mnt/
+                sync
+                umount /mnt
+                echo "TF Card clone complete. You may leave the card in the host or insert it into the Jetson."
+            else
+                # Reached only via explicit 'n' or 's' (abort exits inside confirm()).
+                echo -e "\n---> Skipped or declined formatting. Skipping cloning as well."
+            fi
+        fi
+    fi
+fi
 
 # ------------------------------------------------------------------------------
 # STEP 5: Flash eMMC Bootloader
