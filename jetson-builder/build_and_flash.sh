@@ -90,8 +90,8 @@ confirm() {
 # ------------------------------------------------------------------------------
 echo -e "\n---> Installing Host Dependencies..."
 apt-get update
-# fdtput is provided by device-tree-compiler
-apt-get install -y qemu-user-static device-tree-compiler curl lbzip2 rsync
+# Added libxml2-utils to ensure xmllint is available for flash.sh XML parsing
+apt-get install -y qemu-user-static device-tree-compiler curl lbzip2 rsync libxml2-utils
 
 echo -e "\n================================================================"
 echo "STEP 1: L4T File Sourcing & Extraction"
