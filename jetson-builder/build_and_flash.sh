@@ -179,11 +179,17 @@ if [ "$CONFIRM_CHOICE" = "yes" ]; then
 
     echo -e "\n---> Patching DTB directly using fdtput (Lossless method)..."
 
-    # 1. TF Card / SD Card Boot Enablement
+    # 1. TF Card / SD Card Boot Enablement (sdhci@700b0400)
+    echo "  -> Configuring sdhci@700b0400 for TF Card Boot..."
     fdtput -t s "$DTB_PATH" /sdhci@700b0400 status "okay"
+    fdtput -t x "$DTB_PATH" /sdhci@700b0400 cd-gpios 0x5b 0xc2 0x0
     fdtput -t x "$DTB_PATH" /sdhci@700b0400 uhs-mask 0xc
 
+    for flag in sd-uhs-sdr104 sd-uhs-sdr50 sd-uhs-sdr25 sd-uhs-sdr12 no-mmc; do
+        fdtput "$DTB_PATH" /sdhci@700b0400 "$flag"
+    done
     # 2. SPI1 Enablement
+    echo "  -> Configuring SPI1..."
     fdtput -t s "$DTB_PATH" /spi@7000d400/spi@0 status "okay"
     fdtput -t s "$DTB_PATH" /spi@7000d400/spi@1 status "okay"
 
@@ -195,6 +201,7 @@ if [ "$CONFIRM_CHOICE" = "yes" ]; then
     done
 
     # 3. PWM Enablement (PWM0 and PWM2)
+    echo "  -> Configuring PWM0 and PWM2..."
     fdtput -t s "$DTB_PATH" /pinmux@700008d4/unused_lowpower/lcd_bl_pwm_pv0 nvidia,function "pwm0"
     fdtput -t x "$DTB_PATH" /pinmux@700008d4/unused_lowpower/lcd_bl_pwm_pv0 nvidia,tristate 0x0
     fdtput -t x "$DTB_PATH" /pinmux@700008d4/unused_lowpower/lcd_bl_pwm_pv0 nvidia,enable-input 0x1
@@ -207,7 +214,10 @@ if [ "$CONFIRM_CHOICE" = "yes" ]; then
     EXTLINUX_CONF="$L4T_DIR/rootfs/boot/extlinux/extlinux.conf"
 
     if [ -f "$EXTLINUX_CONF" ]; then
-        sed -i 's/mmcblk0p1/mmcblk1p1/g' "$EXTLINUX_CONF"
+        # The host file uses a template with ${cbootargs}. We must explicitly append the TF card root path.
+        # This overrides the eMMC root path dynamically generated at boot.
+        sed -i 's/APPEND ${cbootargs} quiet/APPEND ${cbootargs} root=\/dev\/mmcblk1p1 rw rootwait rootfstype=ext4 quiet/g' "$EXTLINUX_CONF"
+        echo "  -> extlinux.conf patched successfully for mmcblk1p1."
     else
         echo "Error: Could not find extlinux.conf at:"
         echo "  $EXTLINUX_CONF"
@@ -216,7 +226,6 @@ if [ "$CONFIRM_CHOICE" = "yes" ]; then
 
 else
     echo -e "\n---> Skipping DTB patching step. Proceeding to next phase..."
-
 fi
 # ------------------------------------------------------------------------------
 # STEP 3: System Provisioning & AI Environment Setup
@@ -351,7 +360,7 @@ confirm "Flash the bootloader to the Jetson eMMC now?" a
 
 if [ "$CONFIRM_CHOICE" = "yes" ]; then
     echo -e "\n---> Flashing Bootloader to eMMC..."
-    ./flash.sh --no-flash-system jetson-nano-emmc mmcblk0p1
+    ./flash.sh jetson-nano-emmc mmcblk1p1
     echo -e "\n================================================================"
     echo "SUCCESS! Flash complete."
     echo "The Jetson will now boot the OS from the TF Card."
@@ -360,6 +369,6 @@ if [ "$CONFIRM_CHOICE" = "yes" ]; then
 else
     echo -e "\n---> Skipped flashing the bootloader."
     echo "You can flash manually later by running:"
-    echo "cd $L4T_DIR && ./flash.sh --no-flash-system jetson-nano-emmc mmcblk0p1"
+    echo "cd $L4T_DIR && ./flash.sh jetson-nano-emmc mmcblk1p1"
     exit 0
 fi
