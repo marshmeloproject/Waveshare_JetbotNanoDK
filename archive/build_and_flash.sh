@@ -139,9 +139,9 @@ if [ "$do_extract" = "yes" ]; then
     echo -e "\n---> Extracting BSP..."
     tar -xjf "$BSP_SRC"
 
-    echo -e "\n---> Extracting RootFS (Preserving Permissions)..."
+    echo -e "\n---> Extracting RootFS..."
     cd Linux_for_Tegra/rootfs/
-    tar -xpf "$ROOTFS_SRC"
+    tar -xjf "$ROOTFS_SRC"
     cd ..
 
     echo -e "\n---> Applying NVIDIA Binaries to RootFS..."
@@ -210,128 +210,62 @@ if [ "$CONFIRM_CHOICE" = "yes" ]; then
     fdtput -t x "$DTB_PATH" /pinmux@700008d4/unused_lowpower/pe6 nvidia,tristate 0x0
     fdtput -t x "$DTB_PATH" /pinmux@700008d4/unused_lowpower/pe6 nvidia,enable-input 0x1
 
-    echo -e "\n---> Modifying extlinux.conf for TF Card Booting..."
-    EXTLINUX_CONF="$L4T_DIR/rootfs/boot/extlinux/extlinux.conf"
-
-    if [ -f "$EXTLINUX_CONF" ]; then
-        # The host file uses a template with ${cbootargs}. We must explicitly append the TF card root path.
-        # This overrides the eMMC root path dynamically generated at boot.
-        sed -i 's/APPEND ${cbootargs} quiet/APPEND ${cbootargs} root=\/dev\/mmcblk1p1 rw rootwait rootfstype=ext4 quiet/g' "$EXTLINUX_CONF"
-        echo "  -> extlinux.conf patched successfully for mmcblk1p1."
-    else
-        echo "Error: Could not find extlinux.conf at:"
-        echo "  $EXTLINUX_CONF"
-        exit 1
-    fi
-
 else
     echo -e "\n---> Skipping DTB patching step. Proceeding to next phase..."
 fi
-# ------------------------------------------------------------------------------
-# STEP 3: System Provisioning & AI Environment Setup
-# ------------------------------------------------------------------------------
-echo -e "\n================================================================"
-echo "STEP 3: Provisioning Target RootFS (Chroot)"
-echo "================================================================"
 
-confirm "Proceed with provisioning target filesystem?" y
+# # ------------------------------------------------------------------------------
+# # STEP 4: TF Card Preparation & Cloning
+# # ------------------------------------------------------------------------------
+# echo -e "\n================================================================"
+# echo "STEP 4: TF Card Preparation & Cloning"
+# echo "================================================================"
 
-if [ "$CONFIRM_CHOICE" = "yes" ]; then
-    echo -e "\n---> Setting up chroot environment..."
-    cd "$L4T_DIR" || { echo "Error: Cannot access $L4T_DIR."; exit 1; }
-    
-    # Mount virtual filesystems
-    mkdir -p "$ROOTFS_DIR/proc" "$ROOTFS_DIR/sys" "$ROOTFS_DIR/dev" "$ROOTFS_DIR/dev/pts"
-    mountpoint -q rootfs/proc    || mount -t proc proc rootfs/proc
-    mountpoint -q rootfs/sys     || mount -t sysfs sysfs rootfs/sys
-    mountpoint -q rootfs/dev     || mount --bind /dev rootfs/dev
-    mountpoint -q rootfs/dev/pts || mount --bind /dev/pts rootfs/dev/pts
+# echo -e "\n*** ACTION REQUIRED ***"
+# echo "Please ensure your TF card (min 32GB) is inserted into the host PC."
+# confirm "Proceed with TF Card preparation and cloning?" n
 
-    cp /usr/bin/qemu-aarch64-static rootfs/usr/bin/
-    cp --remove-destination /etc/resolv.conf rootfs/etc/resolv.conf
+# if [ "$CONFIRM_CHOICE" != "yes" ]; then
+#     echo -e "\n---> Skipping TF Card preparation and cloning step."
+#     echo "    You can clone the rootfs to a TF card manually later with:"
+#     echo "      mkfs.ext4 -F /dev/<tfcard>1 && mount /dev/<tfcard>1 /mnt"
+#     echo "      rsync -axHAWX --numeric-ids $ROOTFS_DIR/ /mnt/"
+#     echo "      sync && umount /mnt"
+# else
+#     echo -e "\n================================================================"
+#     lsblk -e 7
+#     echo "================================================================"
+#     read -p "Look at the list above. Enter the identifier of your TF Card (e.g., sdb, sdc): " TFCARD
 
-    # Stage modular scripts using robust absolute paths
-    echo -e "\n---> Staging configuration and modular scripts..."
-    mkdir -p "$ROOTFS_DIR/tmp/provision"
-    cp -r "$SCRIPT_DIR/config" "$ROOTFS_DIR/tmp/provision/"
-    cp -r "$SCRIPT_DIR/scripts/chroot/." "$ROOTFS_DIR/tmp/provision/"
-    cp -r "$SCRIPT_DIR/scripts/desktop" "$ROOTFS_DIR/tmp/provision/"
+#     if [ -z "$TFCARD" ] || [ ! -b "/dev/$TFCARD" ]; then
+#         echo "Invalid drive selected. Skipping TF Card cloning to protect host system."
+#     else
+#         SIZE=$(blockdev --getsize64 /dev/$TFCARD)
+#         if [ "$SIZE" -lt 30000000000 ]; then
+#             echo "Error: Selected drive is smaller than 32GB. Skipping TF Card cloning."
+#         else
+#             confirm "WARNING: /dev/$TFCARD will be WIPED and reformatted as ext4. Proceed?" a
 
-    echo -e "\n---> [1/2] Running System Preparation..."
-    chroot rootfs /bin/bash /tmp/provision/01_system_prep.sh
+#             if [ "$CONFIRM_CHOICE" = "yes" ]; then
+#                 echo -e "\n---> Formatting /dev/$TFCARD as ext4..."
+#                 umount /dev/${TFCARD}* 2>/dev/null || true
+#                 parted -s /dev/$TFCARD mklabel gpt
+#                 parted -s /dev/$TFCARD mkpart primary ext4 0% 100%
+#                 mkfs.ext4 -F /dev/${TFCARD}1
 
-    echo -e "\n---> [2/2] Running AI Stack Provisioning..."
-    chroot rootfs /bin/bash /tmp/provision/02_ai_environment.sh
-
-    # Clean up staging directory inside rootfs
-    rm -rf "$ROOTFS_DIR/tmp/provision"
-    
-    # =========================================================================
-    # ADD THIS: Explicitly unmount before moving to Step 4 & 5
-    # =========================================================================
-    echo -e "\n---> Unmounting virtual filesystems..."
-    umount -f "$ROOTFS_DIR/dev/pts" 2>/dev/null || true
-    umount -f "$ROOTFS_DIR/dev" 2>/dev/null || true
-    umount -f "$ROOTFS_DIR/sys" 2>/dev/null || true
-    umount -f "$ROOTFS_DIR/proc" 2>/dev/null || true
-
-    echo -e "\n---> Target provisioning complete!"
-
-else
-    echo -e "\n---> Skipping bloatware removal and AI installation step..."
-fi
-# ------------------------------------------------------------------------------
-# STEP 4: TF Card Preparation & Cloning
-# ------------------------------------------------------------------------------
-echo -e "\n================================================================"
-echo "STEP 4: TF Card Preparation & Cloning"
-echo "================================================================"
-
-echo -e "\n*** ACTION REQUIRED ***"
-echo "Please ensure your TF card (min 32GB) is inserted into the host PC."
-confirm "Proceed with TF Card preparation and cloning?" n
-
-if [ "$CONFIRM_CHOICE" != "yes" ]; then
-    echo -e "\n---> Skipping TF Card preparation and cloning step."
-    echo "    You can clone the rootfs to a TF card manually later with:"
-    echo "      mkfs.ext4 -F /dev/<tfcard>1 && mount /dev/<tfcard>1 /mnt"
-    echo "      rsync -axHAWX --numeric-ids $ROOTFS_DIR/ /mnt/"
-    echo "      sync && umount /mnt"
-else
-    echo -e "\n================================================================"
-    lsblk -e 7
-    echo "================================================================"
-    read -p "Look at the list above. Enter the identifier of your TF Card (e.g., sdb, sdc): " TFCARD
-
-    if [ -z "$TFCARD" ] || [ ! -b "/dev/$TFCARD" ]; then
-        echo "Invalid drive selected. Skipping TF Card cloning to protect host system."
-    else
-        SIZE=$(blockdev --getsize64 /dev/$TFCARD)
-        if [ "$SIZE" -lt 30000000000 ]; then
-            echo "Error: Selected drive is smaller than 32GB. Skipping TF Card cloning."
-        else
-            confirm "WARNING: /dev/$TFCARD will be WIPED and reformatted as ext4. Proceed?" a
-
-            if [ "$CONFIRM_CHOICE" = "yes" ]; then
-                echo -e "\n---> Formatting /dev/$TFCARD as ext4..."
-                umount /dev/${TFCARD}* 2>/dev/null || true
-                parted -s /dev/$TFCARD mklabel gpt
-                parted -s /dev/$TFCARD mkpart primary ext4 0% 100%
-                mkfs.ext4 -F /dev/${TFCARD}1
-
-                echo -e "\n---> Cloning RootFS to TF Card (This will take a few minutes)..."
-                mount /dev/${TFCARD}1 /mnt
-                rsync -axHAWX --numeric-ids --info=progress2 rootfs/ /mnt/
-                sync
-                umount /mnt
-                echo "TF Card clone complete. You may leave the card in the host or insert it into the Jetson."
-            else
-                # Reached only via explicit 'n' or 's' (abort exits inside confirm()).
-                echo -e "\n---> Skipped or declined formatting. Skipping cloning as well."
-            fi
-        fi
-    fi
-fi
+#                 echo -e "\n---> Cloning RootFS to TF Card (This will take a few minutes)..."
+#                 mount /dev/${TFCARD}1 /mnt
+#                 rsync -axHAWX --numeric-ids --info=progress2 rootfs/ /mnt/
+#                 sync
+#                 umount /mnt
+#                 echo "TF Card clone complete. You may leave the card in the host or insert it into the Jetson."
+#             else
+#                 # Reached only via explicit 'n' or 's' (abort exits inside confirm()).
+#                 echo -e "\n---> Skipped or declined formatting. Skipping cloning as well."
+#             fi
+#         fi
+#     fi
+# fi
 
 # ------------------------------------------------------------------------------
 # STEP 5: Flash eMMC Bootloader
