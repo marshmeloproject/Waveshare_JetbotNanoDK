@@ -255,17 +255,37 @@ else
     echo "WARNING: $PHASE3_SRC not found. Phase 3 script will not be available on the Jetson." >&2
 fi
 
-# --- 3b: Create default user (nvidia/nvidia) via l4t_create_default_user.sh ---
+# --- 3b: Create default user via l4t_create_default_user.sh ---
+# NOTE: l4t_create_default_user.sh determines its rootfs path relative
+#       to its own location (dirname $0). It MUST be executed from inside
+#       the Linux_for_Tegra directory for the path to resolve correctly.
 confirm "Create default user '$DEFAULT_USERNAME' with password '$DEFAULT_PASSWORD'?" y
 if [ "$CONFIRM_CHOICE" = "yes" ]; then
-    if [ -f "$L4T_DIR/l4t_create_default_user.sh" ]; then
-        echo -e "\n---> Running l4t_create_default_user.sh -u $DEFAULT_USERNAME -p $DEFAULT_PASSWORD..."
-        cd "$L4T_DIR"
-        bash ./l4t_create_default_user.sh -u "$DEFAULT_USERNAME" -p "$DEFAULT_PASSWORD"
-        echo "---> Default user '$DEFAULT_USERNAME' created successfully."
+    if [ ! -d "$L4T_DIR" ]; then
+        echo "WARNING: $L4T_DIR does not exist. Cannot create default user." >&2
+        echo "         Ensure Step 1 (extraction) completed successfully." >&2
+    elif [ ! -d "$ROOTFS_DIR" ]; then
+        echo "WARNING: $ROOTFS_DIR does not exist. Cannot create default user." >&2
+        echo "         Ensure RootFS was extracted in Step 1." >&2
     else
-        echo "WARNING: $L4T_DIR/l4t_create_default_user.sh not found." >&2
-        echo "         You will be prompted to create a user on first boot." >&2
+        # Copy l4t_create_default_user.sh from $SCRIPT_DIR to $L4T_DIR if available
+        L4T_USER_SCRIPT_SRC="$SCRIPT_DIR/l4t_create_default_user.sh"
+        if [ -f "$L4T_USER_SCRIPT_SRC" ]; then
+            echo "---> Copying l4t_create_default_user.sh to $L4T_DIR..."
+            cp "$L4T_USER_SCRIPT_SRC" "$L4T_DIR/l4t_create_default_user.sh"
+            chmod +x "$L4T_DIR/l4t_create_default_user.sh"
+        fi
+
+        if [ ! -f "$L4T_DIR/l4t_create_default_user.sh" ]; then
+            echo "WARNING: l4t_create_default_user.sh not found in $L4T_DIR." >&2
+            echo "         You will be prompted to create a user on first boot." >&2
+        else
+            echo -e "\n---> Running l4t_create_default_user.sh -u $DEFAULT_USERNAME -p $DEFAULT_PASSWORD..."
+            echo "    (must run from inside $L4T_DIR for rootfs path resolution)"
+            cd "$L4T_DIR"
+            bash ./l4t_create_default_user.sh -u "$DEFAULT_USERNAME" -p "$DEFAULT_PASSWORD"
+            echo "---> Default user '$DEFAULT_USERNAME' created successfully."
+        fi
     fi
 else
     echo -e "\n---> Skipping default user creation. You will be prompted on first boot."
@@ -311,7 +331,7 @@ if [ "$CONFIRM_CHOICE" = "yes" ]; then
     echo "  Next steps:"
     echo "    1. Remove the Recovery Mode jumper (J40)"
     echo "    2. Boot the Jetson Nano (it will boot from eMMC)"
-    echo "    3. Login as nvidia / nvidia"
+    echo "    3. Login as $DEFAULT_USERNAME / $DEFAULT_PASSWORD"
     echo "    4. Run:  sudo ~/phase2_setup_tf_boot.sh"
     echo "================================================================"
 else

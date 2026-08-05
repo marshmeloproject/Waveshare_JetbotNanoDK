@@ -26,6 +26,15 @@
 set -Eeuo pipefail
 
 # ------------------------------------------------------------------------------
+# Dynamic home directory — do not hardcode "nvidia"
+# ------------------------------------------------------------------------------
+JETSON_USER="${SUDO_USER:-$USER}"
+JETSON_HOME=$(getent passwd "$JETSON_USER" | cut -d: -f6)
+if [ -z "$JETSON_HOME" ] || [ ! -d "$JETSON_HOME" ]; then
+    JETSON_HOME="/home/$JETSON_USER"
+fi
+
+# ------------------------------------------------------------------------------
 # Simplified confirmation helper — Yes / No (no/skip)
 # Sets CONFIRM_CHOICE -> "yes" | "no"
 # ------------------------------------------------------------------------------
@@ -70,6 +79,9 @@ echo "================================================================"
 echo "  PHASE 2: TF Card Boot Setup (Jetson-Side)"
 echo "  Waveshare Jetson Nano Dev Kit"
 echo "================================================================"
+echo ""
+echo "  Detected user : $JETSON_USER"
+echo "  Home directory: $JETSON_HOME"
 echo ""
 echo "This script will:"
 echo "  Step 0 — Optionally restore eMMC boot (if currently on TF card)"
@@ -330,7 +342,7 @@ echo ""
 echo "  The system is now configured to boot from the TF card."
 echo "  After reboot:"
 echo "    - The Jetson will boot from /dev/mmcblk1 (TF card)"
-echo "    - Login as nvidia / nvidia"
+echo "    - Login as $JETSON_USER / $JETSON_USER"
 echo "    - Run:  sudo ~/phase3_ai_environment.sh"
 echo "================================================================"
 echo ""
