@@ -234,10 +234,7 @@ echo "================================================================"
 # --- 3a: Copy scripts into rootfs ---
 PHASE2_SRC="$SCRIPT_DIR/phase2_setup_tf_boot.sh"
 PHASE3_SRC="$SCRIPT_DIR/phase3_ai_environment.sh"
-DEST_HOME="$ROOTFS_DIR/home/$DEFAULT_USERNAME"
-
-echo -e "\n---> Ensuring destination directory exists: $DEST_HOME"
-mkdir -p "$DEST_HOME"
+DEST_HOME="$ROOTFS_DIR/home"
 
 if [ -f "$PHASE2_SRC" ]; then
     cp "$PHASE2_SRC" "$DEST_HOME/phase2_setup_tf_boot.sh"
